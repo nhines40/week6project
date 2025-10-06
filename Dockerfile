@@ -22,7 +22,7 @@ COPY --from=build /app/server ./server
 COPY --from=build /app/public ./public
 
 # Install only production deps
-RUN npm ci
+RUN npm ci --only=production
 
 # Expose the port the app runs on
 EXPOSE 3000
