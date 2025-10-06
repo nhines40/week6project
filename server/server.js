@@ -3,8 +3,10 @@ const axios = require('axios');
 const mongoose = require('mongoose');
 const app = express();
 const https = require('https');
-const WebSocket = require('ws');
-
+const http = require('http');
+const bodyParser = require('body-parser');
+const { Server: SocketIOServer } = require('socket.io');
+ 
 const {
   LINKEDIN_CLIENT_ID,
   LINKEDIN_CLIENT_SECRET,
@@ -14,50 +16,64 @@ const {
   GOOGLE_REDIRECT_URI,
   MONGO_URI
 } = process.env;
-
-app.use(express.json());
-
+ 
+app.use(bodyParser.json());
+ 
 mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
+ 
 const User = mongoose.model('loginCredentials', {
   name: String,
   email: String,
   linkedinId: String,
   googleId: String,
 });
-
+ 
 const linkedinClientId = LINKEDIN_CLIENT_ID;
 const linkedinClientSecret = LINKEDIN_CLIENT_SECRET;
 const googleClientId = GOOGLE_CLIENT_ID;
 const googleClientSecret = GOOGLE_CLIENT_SECRET;
-
-
+ 
 const linkedinRedirectUrl = LINKEDIN_REDIRECT_URI;
 const googleRedirectUrl = GOOGLE_REDIRECT_URI;
-
+ 
 axios.defaults.httpsAgent = new https.Agent({
   rejectUnauthorized: false,
 });
-
+ 
 const wss = new WebSocket.Server({ port: 8080 });
-
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-
-  ws.on('message', (message) => {
-    console.log(`Received message => ${message}`);
-    wss.clients.forEach((client) => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
+ 
+/* 1️⃣ Create a plain http server that Express will use */
+const httpServer = http.createServer(app);
+ 
+/* 2️⃣ Attach Socket.IO to that http server */
+const io = new SocketIOServer(httpServer, {
+  // optional – you can tighten CORS here if you need to
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
+ 
+/* 3️⃣ Connection handling – identical logic to your original ws code */
+io.on('connection', socket => {
+  console.log('🟢 Client connected (socket.id =', socket.id, ')');
+ 
+  // When a client sends a message, rebroadcast it to everyone **except** the sender
+  socket.on('message', msg => {
+    console.log(`📨 Received message => ${msg}`);
+ 
+    // Broadcast to all other sockets
+    socket.broadcast.emit('message', msg);
   });
-
-  ws.on('close', () => {
-    console.log('Client disconnected');
+ 
+  socket.on('disconnect', () => {
+    console.log('🔴 Client disconnected (socket.id =', socket.id, ')');
   });
 });
-
+ 
+/* 4️⃣ IMPORTANT: start the *httpServer* instead of app.listen()   */
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server started on port ${PORT}`);
+});
+ 
 app.get('/api/users', (req, res) => {
   User.find()
     .then(users => {
@@ -68,7 +84,7 @@ app.get('/api/users', (req, res) => {
       res.status(500).json({ message: 'Error fetching users' });
     });
 });
-
+ 
 app.post('/api/users', (req, res) => {
   const { name, email } = req.body;
   const user = new User({ name, email });
@@ -93,7 +109,7 @@ app.put('/api/users/:id', (req, res) => {
       res.status(500).json({ message: 'Error updating user' });
     });
 });
-
+ 
 app.delete('/api/users/:id', (req, res) => {
   User.findByIdAndDelete(req.params.id)
     .then(() => {
@@ -104,12 +120,12 @@ app.delete('/api/users/:id', (req, res) => {
       res.status(500).json({ message: 'Error deleting user' });
     });
 });
-
+ 
 app.get('/auth/linkedin', (req, res) => {
   const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${linkedinClientId}&redirect_uri=${linkedinRedirectUrl}&state=foobar&scope=liteprofile%20emailaddress%20w_member_social`;
   res.redirect(url);
 });
-
+ 
 app.get('/auth/linkedin/callback', (req, res) => {
   const code = req.query.code;
   const state = req.query.state;
@@ -123,7 +139,6 @@ app.get('/auth/linkedin/callback', (req, res) => {
   })
     .then(response => {
       const accessToken = response.data.access_token;
-
       return axios.get(`https://api.linkedin.com/v2/me`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -132,7 +147,6 @@ app.get('/auth/linkedin/callback', (req, res) => {
     })
     .then(response => {
       const userProfile = response.data;
-
       const user = new User({
         name: userProfile.firstName + ' ' + userProfile.lastName,
         email: userProfile.emailAddress,
@@ -148,7 +162,7 @@ app.get('/auth/linkedin/callback', (req, res) => {
       res.status(500).json({ message: 'Error logging in with LinkedIn' });
     });
 });
-
+ 
 app.get('/auth/google', (req, res) => {
   const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${googleRedirectUrl}&scope=profile%20email`;
   res.redirect(url);
@@ -156,7 +170,7 @@ app.get('/auth/google', (req, res) => {
 
 app.get('/auth/google/callback', (req, res) => {
   const code = req.query.code;
-
+ 
   axios.post(`https://oauth2.googleapis.com/token`, {
     grant_type: 'authorization_code',
     code: code,
@@ -174,7 +188,6 @@ app.get('/auth/google/callback', (req, res) => {
     })
     .then(response => {
       const userProfile = response.data;
-
       const user = new User({
         name: userProfile.name,
         email: userProfile.email,
@@ -190,10 +203,4 @@ app.get('/auth/google/callback', (req, res) => {
       res.status(500).json({ message: 'Error logging in with Google' });
     });
 });
-
 app.use(express.static('public'));
-
-const port = 3000;
-app.listen(port, () => {
-  console.log(`Server started on port ${port}`);
-});
