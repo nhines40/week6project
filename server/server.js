@@ -40,8 +40,6 @@ axios.defaults.httpsAgent = new https.Agent({
   rejectUnauthorized: false,
 });
  
-const wss = new WebSocket.Server({ port: 8080 });
- 
 /* 1️⃣ Create a plain http server that Express will use */
 const httpServer = http.createServer(app);
  
