@@ -34,7 +34,7 @@
     "redux": "^5.0.1",
     "webpack": "^5.101.3",
     "webpack-cli": "^6.0.1",
-    "ws": "^8.18.3"
+    "ws": "^7.5.3"
   },
   "devDependencies": {
     "@babel/cli": "^7.28.3",
