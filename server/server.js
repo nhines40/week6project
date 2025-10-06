@@ -3,7 +3,6 @@ const axios = require('axios');
 const mongoose = require('mongoose');
 const app = express();
 const https = require('https');
-const bodyParser = require('body-parser');
 const WebSocket = require('ws');
 
 const {
@@ -16,7 +15,7 @@ const {
   MONGO_URI
 } = process.env;
 
-app.use(bodyParser.json());
+app.use(express.json());
 
 mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
