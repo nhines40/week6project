@@ -49,6 +49,7 @@ jobs:
           EB_APP: week6cloudfinal
           EB_ENV: week6cloudfinal-env
           AWS_REGION: ${{ secrets.AWS_REGION }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           pip install awsebcli
           eb init $EB_APP --region $AWS_REGION -p docker
