@@ -78,25 +78,37 @@ jobs:
         env:
           EB_ENV: week6cloudfinal-env
           # How long we’re willing to wait (seconds). Adjust if your app needs more start‑up time.
-          MAX_WAIT_SECONDS: 600    # 10 minutes
+          MAX_WAIT_SECONDS: 900    # 15 minutes – a little more than before
         run: |
-          echo "🔎 Waiting for Elastic Beanstalk environment '$EB_ENV' to reach GREEN health…"
-          END=$(( $(date +%s) + MAX_WAIT_SECONDS ))
+          get_health() {
+            # The AWS CLI returns JSON; we pull out the field "HealthStatus".
+            # Example output:  "HealthStatus": "Ok"
+            aws elasticbeanstalk describe-environment-health \
+              --environment-name "$EB_ENV" \
+              --attribute-names HealthStatus \
+              --query 'HealthStatus' \
+              --output text 2>/dev/null || echo "Unknown"
+          }
+
+          echo "🔎 Waiting for Elastic Beanstalk environment '$EB_ENV' to become GREEN (HealthStatus=Ok)…"
+          END=$(( $(date +%s) + $MAX_WAIT_SECONDS ))
 
           while true; do
-            # Grab the health status – the output looks like “Health: Green”
-            HEALTH=$(eb health $EB_ENV --verbose | awk '/^Health:/ {print $2}')
-            echo "Current health: $HEALTH"
+            STATUS=$(get_health)
+            echo "Current HealthStatus: $STATUS"
 
-            if [ "$HEALTH" = "Green" ]; then
-              echo "✅ Environment health is GREEN – continuing."
+            if [[ "$STATUS" == "Ok" ]]; then
+              echo "✅ Environment health is GREEN (Ok) – continuing."
               exit 0
             fi
 
-            if [ $(date +%s) -ge $END ]; then
+            if [[ $(date +%s) -ge $END ]]; then
               echo "❌ Timed out after $MAX_WAIT_SECONDS seconds waiting for GREEN health."
               echo "Final health dump for debugging:"
-              eb health $EB_ENV --verbose
+              aws elasticbeanstalk describe-environment-health \
+                --environment-name "$EB_ENV" \
+                --attribute-names All \
+                --output yaml
               exit 1
             fi
 
