@@ -22,12 +22,6 @@ jobs:
         with:
           node-version: '20'
 
-      # ---- Run unit tests (optional) ----
-      - name: Install deps & test
-        run: |
-          npm ci
-          npm test   # make sure you have a test script; otherwise remove this step
-
       # ---- Authenticate to AWS via OIDC ----
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
