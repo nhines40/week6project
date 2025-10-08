@@ -1,56 +1,46 @@
 name: CI / CD – Build, Push, Deploy
 
-# Fires on every push to the main branch
 on:
   push:
     branches: [ main ]
 
-# for OIDC token exchange
-permissions:
-  id-token: write      # allows the configure‑aws‑credentials action to use OIDC
-  contents: read
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write      # needed for OIDC to AWS
+      contents: read
 
     steps:
-      # -------------------------------------------------
-      # 1️⃣ Checkout the source code
-      # -------------------------------------------------
+      # ---- Checkout source ----
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -------------------------------------------------
-      # 2️⃣ (Optional) Run lint / tests
-      # -------------------------------------------------
-      - name: Install Node & run tests
+      # ---- Set up Node (for lint / test) ----
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # ---- Run unit tests (optional) ----
+      - name: Install deps & test
         run: |
           npm ci
-          # npm test   # uncomment if you have a test script
+          npm test   # make sure you have a test script; otherwise remove this step
 
-      # -------------------------------------------------
-      # 3️⃣ Assume the IAM role via OIDC
-      # -------------------------------------------------
+      # ---- Authenticate to AWS via OIDC ----
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsDeployRole   # <-- create this role
+          aws-region: us-east-1
 
-      # -------------------------------------------------
-      # 4️⃣ Login to Amazon ECR
-      # -------------------------------------------------
+      # ---- Login to ECR ----
       - name: Login to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # -------------------------------------------------
-      # 5️⃣ Build Docker image, tag with commit SHA, push to ECR
-      # -------------------------------------------------
+      # ---- Build, tag, and push Docker image ----
       - name: Build and push Docker image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
@@ -59,26 +49,16 @@ jobs:
           docker build -t $ECR_REGISTRY/week6project:$IMAGE_TAG .
           docker push $ECR_REGISTRY/week6project:$IMAGE_TAG
 
-      # -------------------------------------------------
-      # 6️⃣ Deploy to Elastic Beanstalk
-      # -------------------------------------------------
+      # ---- Deploy to Elastic Beanstalk (pull the new image) ----
       - name: Deploy to Elastic Beanstalk
         env:
-          EB_APP: week6cloudfinal          # <-- Elastic Beanstalk application name
-          EB_ENV: week6cloudfinal-env      # <-- Elastic Beanstalk environment name
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+          EB_APP: week6cloudfinal
+          EB_ENV: week6cloudfinal-env
+          AWS_REGION: us-east-1
         run: |
-          # Install the EB CLI (Python‑based)
-          pip install --quiet awsebcli
-
-          # Initialise the EB app (idempotent – safe to run repeatedly)
+          pip install awsebcli
           eb init $EB_APP --region $AWS_REGION -p docker
-
-          # Select the existing environment
           eb use $EB_ENV
-
-          # Tell EB which image tag we just pushed
+          # Tell EB to use the newly‑pushed tag
           eb setenv IMAGE_TAG=${{ github.sha }}
-
-          # Deploy – --quiet suppresses interactive prompts
           eb deploy --quiet
