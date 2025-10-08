@@ -12,29 +12,39 @@ jobs:
       contents: read
 
     steps:
-      # ---- Checkout source ----
+      # -------------------------------------------------
+      # 1️⃣ Checkout source
+      # -------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---- Set up Node (for lint / test) ----
+      # -------------------------------------------------
+      # 2️⃣ Set up Node (for lint / test)
+      # -------------------------------------------------
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # ---- Authenticate to AWS via OIDC ----
+      # -------------------------------------------------
+      # 3️⃣ Authenticate to AWS via OIDC
+      # -------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # ---- Login to ECR ----
+      # -------------------------------------------------
+      # 4️⃣ Login to ECR
+      # -------------------------------------------------
       - name: Login to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ---- Build, tag, and push Docker image ----
+      # -------------------------------------------------
+      # 5️⃣ Build, tag, and push Docker image
+      # -------------------------------------------------
       - name: Build and push Docker image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
@@ -43,7 +53,9 @@ jobs:
           docker build -t $ECR_REGISTRY/week6project:$IMAGE_TAG .
           docker push $ECR_REGISTRY/week6project:$IMAGE_TAG
 
-      # ---- Deploy to Elastic Beanstalk (pull the new image) ----
+      # -------------------------------------------------
+      # 6️⃣ Deploy to Elastic Beanstalk (pull the new image)
+      # -------------------------------------------------
       - name: Deploy to Elastic Beanstalk
         env:
           EB_APP: week6cloudfinal
@@ -51,9 +63,42 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          pip install awsebcli
+          pip install --quiet awsebcli
           eb init $EB_APP --region $AWS_REGION -p docker
           eb use $EB_ENV
-          # Tell EB to use the newly‑pushed tag
-          eb setenv IMAGE_TAG=${{ github.sha }}
-          eb deploy --quiet
+          # Tell EB which image tag to pull
+          eb setenv IMAGE_TAG=${IMAGE_TAG}
+          # Deploy – ignore the exit code (EB may return 4 if health isn’t green yet)
+          eb deploy --quiet || true
+
+      # -------------------------------------------------
+      # 7️⃣ Wait until the environment health becomes GREEN
+      # -------------------------------------------------
+      - name: Wait for Elastic Beanstalk health = GREEN
+        env:
+          EB_ENV: week6cloudfinal-env
+          # How long we’re willing to wait (seconds). Adjust if your app needs more start‑up time.
+          MAX_WAIT_SECONDS: 600    # 10 minutes
+        run: |
+          echo "🔎 Waiting for Elastic Beanstalk environment '$EB_ENV' to reach GREEN health…"
+          END=$(( $(date +%s) + MAX_WAIT_SECONDS ))
+
+          while true; do
+            # Grab the health status – the output looks like “Health: Green”
+            HEALTH=$(eb health $EB_ENV --verbose | awk '/^Health:/ {print $2}')
+            echo "Current health: $HEALTH"
+
+            if [ "$HEALTH" = "Green" ]; then
+              echo "✅ Environment health is GREEN – continuing."
+              exit 0
+            fi
+
+            if [ $(date +%s) -ge $END ]; then
+              echo "❌ Timed out after $MAX_WAIT_SECONDS seconds waiting for GREEN health."
+              echo "Final health dump for debugging:"
+              eb health $EB_ENV --verbose
+              exit 1
+            fi
+
+            sleep 15
+          done
