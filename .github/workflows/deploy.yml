@@ -1,0 +1,84 @@
+name: CI / CD – Build, Push, Deploy
+
+# Fires on every push to the main branch
+on:
+  push:
+    branches: [ main ]
+
+ for OIDC token exchange
+permissions:
+  id-token: write      # allows the configure‑aws‑credentials action to use OIDC
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------
+      # 1️⃣ Checkout the source code
+      # -------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------
+      # 2️⃣ (Optional) Run lint / tests
+      # -------------------------------------------------
+      - name: Install Node & run tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+        run: |
+          npm ci
+          # npm test   # uncomment if you have a test script
+
+      # -------------------------------------------------
+      # 3️⃣ Assume the IAM role via OIDC
+      # -------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # -------------------------------------------------
+      # 4️⃣ Login to Amazon ECR
+      # -------------------------------------------------
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # -------------------------------------------------
+      # 5️⃣ Build Docker image, tag with commit SHA, push to ECR
+      # -------------------------------------------------
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/week6project:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/week6project:$IMAGE_TAG
+
+      # -------------------------------------------------
+      # 6️⃣ Deploy to Elastic Beanstalk
+      # -------------------------------------------------
+      - name: Deploy to Elastic Beanstalk
+        env:
+          EB_APP: week6cloudfinal          # <-- Elastic Beanstalk application name
+          EB_ENV: week6cloudfinal-env      # <-- Elastic Beanstalk environment name
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          # Install the EB CLI (Python‑based)
+          pip install --quiet awsebcli
+
+          # Initialise the EB app (idempotent – safe to run repeatedly)
+          eb init $EB_APP --region $AWS_REGION -p docker
+
+          # Select the existing environment
+          eb use $EB_ENV
+
+          # Tell EB which image tag we just pushed
+          eb setenv IMAGE_TAG=${{ github.sha }}
+
+          # Deploy – --quiet suppresses interactive prompts
+          eb deploy --quiet
