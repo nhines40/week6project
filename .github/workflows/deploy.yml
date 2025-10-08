@@ -5,7 +5,7 @@ on:
   push:
     branches: [ main ]
 
- for OIDC token exchange
+# for OIDC token exchange
 permissions:
   id-token: write      # allows the configure‑aws‑credentials action to use OIDC
   contents: read
